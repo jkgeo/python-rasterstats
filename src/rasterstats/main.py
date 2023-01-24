@@ -36,6 +36,11 @@ def gen_zonal_stats(
         vectors, raster,
         layer=0,
         band=1,
+        mask_raster=None,
+        mask_layer=0,
+        mask_band=1,
+        mask_type='binary',
+        mask_threshold=0.5,
         nodata=None,
         affine=None,
         stats=None,
@@ -46,7 +51,7 @@ def gen_zonal_stats(
         zone_func=None,
         raster_out=False,
         prefix=None,
-        geojson_out=False, 
+        geojson_out=False,
         boundless=True, **kwargs):
     """Zonal statistics of raster values aggregated to vector geometries.
 
@@ -65,6 +70,26 @@ def gen_zonal_stats(
     band: int, optional
         If `raster` is a GDAL source, the band number to use (counting from 1).
         defaults to 1.
+
+    mask_raster: ndarray or path to a GDAL raster source of an additional mask to apply to the primary raster
+        If ndarray is passed, the ``affine`` kwarg is required.
+
+    mask_layer: int or string, optional
+        If `vectors` is a path to a fiona source,
+        specify the vector layer to use either by name or number.
+        defaults to 0
+
+    mask_band: int, optional
+        If `raster` is a GDAL source, the band number to use (counting from 1).
+        defaults to 1.
+
+    mask_type: string, optional
+        Can be 'binary' or 'percent'
+        If binary 1 = crop and 0 = nocrop
+        If percent, decimal values correspond to percentage of pixel that contains crop
+
+    mask_threshold: float, optional
+        If `mask_type` = 'percent', a threshold can be specified to select mask pixels at or above specifid threshold
 
     nodata: float, optional
         If `raster` is a GDAL source, this value overrides any NODATA value
@@ -113,11 +138,11 @@ def gen_zonal_stats(
         Original feature geometry and properties will be retained
         with zonal stats appended as additional properties.
         Use with `prefix` to ensure unique and meaningful property names.
-    
+
     boundless: boolean
         Allow features that extend beyond the raster dataset’s extent, default: True
         Cells outside dataset extents are treated as nodata.
-        
+
     Returns
     -------
     generator of dicts (if geojson_out is False)
@@ -173,11 +198,26 @@ def gen_zonal_stats(
             if has_nan:
                 isnodata = (isnodata | np.isnan(fsrc.array))
 
-            # Mask the source data array
-            # mask everything that is not a valid value or not within our geom
-            masked = np.ma.MaskedArray(
-                fsrc.array,
-                mask=(isnodata | ~rv_array))
+            if mask_raster is not None:
+                with Raster(mask_raster, affine, nodata, band) as mask_rast:
+                    msrc = mask_rast.read(
+                        bounds=geom_bounds, boundless=boundless)
+                    if mask_type == 'binary':
+                        isnocrop = (msrc.array == 0)
+                    elif mask_type == 'percent':
+                        isnocrop = (msrc.array < mask_threshold)
+
+                    masked = np.ma.MaskedArray(
+                        fsrc.array,
+                        mask=(isnodata | ~rv_array | isnocrop)
+                    )
+
+            else:
+                # Mask the source data array
+                # mask everything that is not a valid value or not within our geom
+                masked = np.ma.MaskedArray(
+                    fsrc.array,
+                    mask=(isnodata | ~rv_array))
 
             # If we're on 64 bit platform and the array is an integer type
             # make sure we cast to 64 bit to avoid overflow.
@@ -206,7 +246,8 @@ def gen_zonal_stats(
                     feature_stats['count'] = 0
             else:
                 if run_count:
-                    keys, counts = np.unique(masked.compressed(), return_counts=True)
+                    keys, counts = np.unique(
+                        masked.compressed(), return_counts=True)
                     try:
                         pixel_count = dict(zip([k.item() for k in keys],
                                                [c.item() for c in counts]))
@@ -217,7 +258,8 @@ def gen_zonal_stats(
                 if categorical:
                     feature_stats = dict(pixel_count)
                     if category_map:
-                        feature_stats = remap_categories(category_map, feature_stats)
+                        feature_stats = remap_categories(
+                            category_map, feature_stats)
                 else:
                     feature_stats = {}
 
@@ -235,11 +277,14 @@ def gen_zonal_stats(
                 if 'std' in stats:
                     feature_stats['std'] = float(masked.std())
                 if 'median' in stats:
-                    feature_stats['median'] = float(np.median(masked.compressed()))
+                    feature_stats['median'] = float(
+                        np.median(masked.compressed()))
                 if 'majority' in stats:
-                    feature_stats['majority'] = float(key_assoc_val(pixel_count, max))
+                    feature_stats['majority'] = float(
+                        key_assoc_val(pixel_count, max))
                 if 'minority' in stats:
-                    feature_stats['minority'] = float(key_assoc_val(pixel_count, min))
+                    feature_stats['minority'] = float(
+                        key_assoc_val(pixel_count, min))
                 if 'unique' in stats:
                     feature_stats['unique'] = len(list(pixel_count.keys()))
                 if 'range' in stats:
@@ -262,14 +307,17 @@ def gen_zonal_stats(
                 featmasked = np.ma.MaskedArray(fsrc.array, mask=(~rv_array))
 
                 if 'nodata' in stats:
-                    feature_stats['nodata'] = float((featmasked == fsrc.nodata).sum())
+                    feature_stats['nodata'] = float(
+                        (featmasked == fsrc.nodata).sum())
                 if 'nan' in stats:
-                    feature_stats['nan'] = float(np.isnan(featmasked).sum()) if has_nan else 0
+                    feature_stats['nan'] = float(
+                        np.isnan(featmasked).sum()) if has_nan else 0
 
             if add_stats is not None:
                 for stat_name, stat_func in add_stats.items():
                     try:
-                        feature_stats[stat_name] = stat_func(masked, feat['properties'])
+                        feature_stats[stat_name] = stat_func(
+                            masked, feat['properties'])
                     except TypeError:
                         # backwards compatible with single-argument function
                         feature_stats[stat_name] = stat_func(masked)
