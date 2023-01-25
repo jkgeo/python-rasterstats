@@ -74,11 +74,6 @@ def gen_zonal_stats(
     mask_raster: ndarray or path to a GDAL raster source of an additional mask to apply to the primary raster
         If ndarray is passed, the ``affine`` kwarg is required.
 
-    mask_layer: int or string, optional
-        If `vectors` is a path to a fiona source,
-        specify the vector layer to use either by name or number.
-        defaults to 0
-
     mask_band: int, optional
         If `raster` is a GDAL source, the band number to use (counting from 1).
         defaults to 1.
@@ -199,7 +194,7 @@ def gen_zonal_stats(
                 isnodata = (isnodata | np.isnan(fsrc.array))
 
             if mask_raster is not None:
-                with Raster(mask_raster, affine, nodata, band) as mask_rast:
+                with Raster(mask_raster, affine, nodata, mask_band) as mask_rast:
                     msrc = mask_rast.read(
                         bounds=geom_bounds, boundless=boundless)
                     if mask_type == 'binary':
