@@ -266,6 +266,14 @@ def gen_zonal_stats(
                     feature_stats['mean'] = float(masked.mean())
                 if 'count' in stats:
                     feature_stats['count'] = int(masked.count())
+                if mask_raster is not None:
+                    feature_stats['feature_count'] = int(np.ma.MaskedArray(
+                        rv_array, mask=(~rv_array | isnocrop)
+                    ).count())
+                else:
+                    feature_stats['feature_count'] = int(np.ma.MaskedArray(
+                        rv_array, mask=~rv_array
+                    ).count())
                 # optional
                 if 'sum' in stats:
                     feature_stats['sum'] = float(masked.sum())
