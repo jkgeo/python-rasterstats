@@ -239,6 +239,14 @@ def gen_zonal_stats(
                 feature_stats = dict([(stat, None) for stat in stats])
                 if 'count' in stats:  # special case, zero makes sense here
                     feature_stats['count'] = 0
+                    if mask_raster is not None:
+                        feature_stats['feature_count'] = int(np.ma.MaskedArray(
+                            rv_array, mask=(~rv_array | isnocrop)
+                        ).count())
+                    else:
+                        feature_stats['feature_count'] = int(np.ma.MaskedArray(
+                            rv_array, mask=~rv_array
+                        ).count())
             else:
                 if run_count:
                     keys, counts = np.unique(
